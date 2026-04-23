@@ -1,0 +1,1053 @@
+Thought for 18s
+
+Ừ, tới mức này là đủ rồi cho phần backend core của bạn.
+
+Kết luận ngắn
+
+Hiện tại nếu bạn đã sửa xong:
+
+eventQuestionController admin
+eventQuestionController user
+orderController phần answers
+
+thì luồng “câu hỏi trước khi thanh toán” đã đủ để ghép vào nghiệp vụ tổng.
+
+Nói dễ hiểu là giờ web của bạn đã có đủ chuỗi này:
+
+event → ticket type → câu hỏi event → user trả lời → tạo order → payment → issue ticket → mint NFT → transfer
+
+Đây là mức rất ổn.
+
+Đủ ở chỗ nào
+1. Về DB
+
+Đủ rồi:
+
+event_questions
+event_question_options
+order_question_answers
+
+Bạn không cần đẻ thêm bảng mới nữa.
+
+2. Về backend nghiệp vụ
+
+Đủ rồi nếu đã có:
+
+admin tạo / sửa / xóa câu hỏi
+user xem câu hỏi của event
+create order nhận thêm answers
+lưu được vào order_question_answers
+xem chi tiết order trả được answers
+3. Về scope đồ án
+
+Đủ rồi, vì phần này chỉ cần:
+
+làm cho luồng mua vé thực tế hơn
+có thêm thông tin trước thanh toán
+bám sát nghiệp vụ
+
+Không cần mở rộng thêm:
+
+option động
+checkbox/radio full
+form theo từng vé riêng biệt
+Bây giờ cái cần là test chốt lần cuối
+
+Nếu mấy cái này pass hết thì coi như đủ thật.
+
+Checklist test cuối cho phần question
+A. Admin
+tạo 3 câu hỏi cho event
+xem danh sách câu hỏi
+sửa 1 câu hỏi
+xóa 1 câu hỏi thử
+B. User
+gọi GET /api/users/events/:eventId/questions
+thấy đúng danh sách câu hỏi theo sort_order
+C. Create order
+Test fail
+thiếu answer của câu hỏi bắt buộc
+question_id không thuộc event
+trả lời trùng question_id
+Test success
+gửi đủ answers
+tạo order thành công
+trong response có answers
+D. Check DB
+
+Trong order_question_answers phải có:
+
+order_id
+question_id
+question_text_snapshot
+answer_text
+E. Check order detail
+
+GET /api/users/orders/:id
+phải thấy:
+
+items
+answers
+payments
+Sau đó phải test lại full flow 1 lần
+
+Rất quan trọng. Sau khi thêm question vào order, bạn nên chạy lại nguyên luồng:
+
+admin tạo event
+admin tạo ticket type
+admin tạo event questions
+user lấy question
+user tạo order có answers
+user payment
+admin issue tickets
+admin mint NFT
+user xem ticket
+user tạo transfer
+admin approve transfer
+
+Nếu full flow này vẫn pass thì coi như bản backend của bạn đã chốt được.
+
+Có cần làm thêm gì nữa không?
+Không cần thêm feature nặng nữa
+
+Mình không khuyên bạn làm thêm:
+
+payment on-chain thật
+metadata public/IPFS
+transfer on-chain thật
+resale có dòng tiền
+question options full
+Nên làm tiếp
+test lại toàn bộ
+dọn code
+chốt tài liệu / báo cáo / demo
+Chốt cuối
+
+Ừ, giờ là đủ rồi.
+Từ đây không nên mở thêm tính năng lớn nữa. Việc đúng nhất bây giờ là:
+
+retest toàn bộ flow và chốt bản cuối.
+
+Nếu bạn muốn, mình sẽ làm tiếp cho bạn một checklist test full project từ đầu đến cuối để bạn tick từng bước.
+
+mhm khoan giờ cho t 1 cái tổng hợp llệnh test trên post man đi, chi tiết tí để tụi nhóm t nó biết đường làm fe
+Thought for 1m 29s
+
+Ok, sau khi bạn đã dán 3 file mình vừa sửa, thì phần câu hỏi trước thanh toán coi như đủ để chốt backend.
+
+Giờ bạn làm đúng 5 bước này:
+
+1) Restart backend
+
+Trong terminal:
+
+rs
+
+hoặc chạy lại:
+
+npm run dev
+2) Test admin tạo câu hỏi cho event
+Tạo câu 1
+
+POST http://localhost:5001/api/admin/events/1/questions
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+
+Body:
+
+{
+  "question_text": "Tôi đồng ý cho Ticketbox và BTC sử dụng thông tin với mục đích vận hành sự kiện",
+  "question_type": "text",
+  "is_required": 1,
+  "sort_order": 1
+}
+Tạo câu 2
+
+POST http://localhost:5001/api/admin/events/1/questions
+
+{
+  "question_text": "Họ & tên / Full name",
+  "question_type": "text",
+  "is_required": 1,
+  "sort_order": 2
+}
+Tạo câu 3
+
+POST http://localhost:5001/api/admin/events/1/questions
+
+{
+  "question_text": "Số điện thoại",
+  "question_type": "text",
+  "is_required": 1,
+  "sort_order": 3
+}
+3) Test user lấy câu hỏi của event
+
+GET http://localhost:5001/api/users/events/1/questions
+
+Kỳ vọng:
+
+trả ra đúng 3 câu hỏi
+đúng sort_order
+4) Test tạo order có answers
+
+POST http://localhost:5001/api/users/orders
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+Content-Type: application/json
+
+Body:
+
+{
+  "payment_method": "metamask",
+  "notes": "Đặt vé test có câu hỏi",
+  "items": [
+    {
+      "ticket_type_id": 2,
+      "quantity": 1
+    }
+  ],
+  "answers": [
+    {
+      "question_id": 1,
+      "answer_text": "Đồng ý"
+    },
+    {
+      "question_id": 2,
+      "answer_text": "Nguyen Van A"
+    },
+    {
+      "question_id": 3,
+      "answer_text": "0912345678"
+    }
+  ]
+}
+
+Kỳ vọng:
+
+tạo order thành công
+response có thêm mảng answers
+5) Test xem chi tiết order
+
+GET http://localhost:5001/api/users/orders/:id
+
+Kỳ vọng:
+
+có items
+có answers
+có payments
+Nếu 5 bước này pass
+
+Thì phần này đủ rồi.
+
+Nói gọn là giờ backend của bạn đã có đủ luồng:
+
+admin tạo câu hỏi cho event
+user lấy câu hỏi
+user trả lời trước khi thanh toán
+backend lưu câu trả lời theo order
+
+Đây là mức đủ đẹp nghiệp vụ cho đồ án.
+
+Sau đó nên làm gì
+
+Nếu test pass hết, bước tiếp theo đúng nhất là:
+
+retest lại full flow từ tạo order đến mint
+rồi mình sẽ giúp bạn chốt bộ API Postman cuối cùng cho cả nhóm FE.
+Văn bản đã dán (1)(3).txt
+Tài liệu
+ đây là phần t tổng hợp trước khi sửa, giờ m tổng hợp 1 bản hoàn thiện để test đi
+Thought for 55s
+
+Ok, mình gom lại thành 1 bộ test Postman hoàn thiện theo đúng hướng hiện tại của project bạn:
+
+có auth
+wallet
+event
+ticket type
+event questions
+order có answers
+payment
+issue ticket
+mint NFT
+ticket
+transfer trong hệ thống
+
+Mình cập nhật lại theo mấy điểm mới nhất:
+
+auth dùng GET /api/users/me cho profile.
+user mẫu hiện tại bạn đang dùng là:
+customer: customervevuive@gmail.com với ví 0x1f18004d19fcd5e8f2b89ffb5178cb01b5146211
+receiver: receivervevuive@gmail.com với ví 0xb0a566f3f0ec8f57e362e3e0fd0e16417c1a5f8e
+admin: adminvevuive@gmail.com / Admin@1234.
+0. Base URL
+http://localhost:5001
+1. Tài khoản mẫu để test
+Admin
+{
+  "email": "adminvevuive@gmail.com",
+  "password": "Admin@1234"
+}
+Customer
+{
+  "email": "customervevuive@gmail.com",
+  "password": "User@1234"
+}
+
+Ví customer:
+
+0x1f18004d19fcd5e8f2b89ffb5178cb01b5146211
+Receiver
+{
+  "email": "receivervevuive@gmail.com",
+  "password": "User@1234"
+}
+
+Ví receiver:
+
+0xb0a566f3f0ec8f57e362e3e0fd0e16417c1a5f8e
+
+Các dữ liệu này đúng với bản bạn vừa tổng hợp.
+
+2. Chuẩn bị token
+2.1 Login admin
+
+POST /api/users/login
+
+{
+  "email": "adminvevuive@gmail.com",
+  "password": "Admin@1234"
+}
+2.2 Login customer
+
+POST /api/users/login
+
+{
+  "email": "customervevuive@gmail.com",
+  "password": "User@1234"
+}
+2.3 Login receiver
+
+POST /api/users/login
+
+{
+  "email": "receivervevuive@gmail.com",
+  "password": "User@1234"
+}
+
+Dùng token trả về cho header:
+
+Authorization: Bearer <TOKEN>
+
+Login dùng JWT và trả token/user info theo controller auth hiện tại.
+
+3. Auth
+3.1 Đăng ký customer mới
+
+POST /api/users/register
+
+{
+  "full_name": "Customer VeVuiVe",
+  "email": "customervevuive@gmail.com",
+  "phone": "0922222222",
+  "password": "User@1234",
+  "confirm_password": "User@1234"
+}
+3.2 Đăng ký receiver mới
+
+POST /api/users/register
+
+{
+  "full_name": "Receiver VeVuiVe",
+  "email": "receivervevuive@gmail.com",
+  "phone": "0933333333",
+  "password": "User@1234",
+  "confirm_password": "User@1234"
+}
+3.3 Xem profile
+
+GET /api/users/me
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+3.4 Cập nhật profile
+
+PUT /api/users/profile
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+Content-Type: application/json
+{
+  "full_name": "Customer Updated",
+  "phone": "0922222222"
+}
+3.5 Đổi mật khẩu
+
+PUT /api/users/change-password
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+Content-Type: application/json
+{
+  "current_password": "User@1234",
+  "new_password": "User@12345",
+  "confirm_new_password": "User@12345"
+}
+
+Auth hiện đã có đủ register/login/me/profile/change-password.
+
+4. Wallet
+4.1 Liên kết ví customer
+
+POST /api/users/wallet
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+Content-Type: application/json
+{
+  "wallet_address": "0x1f18004d19fcd5e8f2b89ffb5178cb01b5146211",
+  "wallet_type": "metamask",
+  "network_name": "sepolia"
+}
+4.2 Liên kết ví receiver
+
+POST /api/users/wallet
+
+Header:
+
+Authorization: Bearer <RECEIVER_TOKEN>
+Content-Type: application/json
+{
+  "wallet_address": "0xb0a566f3f0ec8f57e362e3e0fd0e16417c1a5f8e",
+  "wallet_type": "metamask",
+  "network_name": "sepolia"
+}
+4.3 Xem ví của tôi
+
+GET /api/users/wallet
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+4.4 Cập nhật ví
+
+PUT /api/users/wallet
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+Content-Type: application/json
+{
+  "wallet_address": "0xabcdef1234567890abcdef1234567890abcdef12",
+  "wallet_type": "walletconnect",
+  "network_name": "sepolia"
+}
+4.5 Xóa ví
+
+DELETE /api/users/wallet
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+5. Events
+5.1 Admin tạo sự kiện
+
+POST /api/admin/events
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+{
+  "title": "Concert Updated",
+  "description": "Sự kiện test hệ thống",
+  "location": "TP.HCM",
+  "event_date": "2026-08-15 19:30:00",
+  "banner_image": "https://example.com/banner.jpg",
+  "organizer_name": "VeVuiVe",
+  "status": "on_sale"
+}
+5.2 Admin xem danh sách sự kiện
+
+GET /api/admin/events
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+5.3 Admin xem chi tiết sự kiện
+
+GET /api/admin/events/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+5.4 Admin cập nhật sự kiện
+
+PUT /api/admin/events/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+{
+  "title": "Concert Updated",
+  "location": "TP.HCM",
+  "status": "on_sale"
+}
+5.5 Admin xóa sự kiện
+
+DELETE /api/admin/events/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+5.6 User xem danh sách sự kiện public
+
+GET /api/users/events
+
+5.7 User xem chi tiết sự kiện
+
+GET /api/users/events/1
+
+6. Ticket Types
+6.1 Admin tạo loại vé
+
+POST /api/admin/events/1/ticket-types
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+{
+  "name": "VIP",
+  "description": "Vé VIP test",
+  "price": 1500000,
+  "quantity_total": 100,
+  "max_per_order": 4,
+  "sale_start": "2026-04-01 09:00:00",
+  "sale_end": "2026-12-19 23:59:59",
+  "status": "active"
+}
+6.2 Admin xem loại vé của sự kiện
+
+GET /api/admin/events/1/ticket-types
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+6.3 Admin xem chi tiết loại vé
+
+GET /api/admin/ticket-types/2
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+6.4 Admin cập nhật loại vé
+
+PUT /api/admin/ticket-types/2
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+{
+  "price": 1800000,
+  "quantity_total": 120,
+  "max_per_order": 5,
+  "status": "active"
+}
+6.5 Admin xóa loại vé
+
+DELETE /api/admin/ticket-types/2
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+6.6 User xem loại vé public
+
+GET /api/users/events/1/ticket-types
+
+7. Event Questions trước thanh toán
+
+Phần này là mới thêm để FE làm form trước khi user tạo order.
+
+7.1 Admin tạo câu hỏi số 1
+
+POST /api/admin/events/1/questions
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+{
+  "question_text": "Tôi đồng ý cho Ticketbox và BTC sử dụng thông tin với mục đích vận hành sự kiện",
+  "question_type": "text",
+  "is_required": 1,
+  "sort_order": 1
+}
+7.2 Admin tạo câu hỏi số 2
+
+POST /api/admin/events/1/questions
+
+{
+  "question_text": "Họ & tên / Full name",
+  "question_type": "text",
+  "is_required": 1,
+  "sort_order": 2
+}
+7.3 Admin tạo câu hỏi số 3
+
+POST /api/admin/events/1/questions
+
+{
+  "question_text": "Số điện thoại",
+  "question_type": "text",
+  "is_required": 1,
+  "sort_order": 3
+}
+7.4 Admin xem danh sách câu hỏi của event
+
+GET /api/admin/events/1/questions
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+7.5 Admin xem chi tiết 1 câu hỏi
+
+GET /api/admin/questions/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+7.6 Admin cập nhật câu hỏi
+
+PUT /api/admin/questions/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+{
+  "question_text": "Tôi đồng ý cho BTC sử dụng thông tin để vận hành sự kiện",
+  "question_type": "text",
+  "is_required": 1,
+  "sort_order": 1
+}
+7.7 Admin xóa câu hỏi
+
+DELETE /api/admin/questions/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+7.8 User lấy danh sách câu hỏi của event
+
+GET /api/users/events/1/questions
+
+FE dùng endpoint này để render form trước khi tạo order.
+
+8. Orders
+8.1 User tạo order có answers
+
+POST /api/users/orders
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+Content-Type: application/json
+{
+  "payment_method": "metamask",
+  "notes": "Đặt vé test có câu hỏi",
+  "items": [
+    {
+      "ticket_type_id": 2,
+      "quantity": 2
+    }
+  ],
+  "answers": [
+    {
+      "question_id": 1,
+      "answer_text": "Đồng ý"
+    },
+    {
+      "question_id": 2,
+      "answer_text": "Nguyen Van A"
+    },
+    {
+      "question_id": 3,
+      "answer_text": "0912345678"
+    }
+  ]
+}
+FE note
+items là danh sách vé user chọn
+answers là câu trả lời form trước thanh toán
+hiện tại answers đang lưu theo order, không theo từng vé
+8.2 User xem danh sách order
+
+GET /api/users/orders
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+8.3 User xem chi tiết order
+
+GET /api/users/orders/2
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+
+Kỳ vọng detail trả về:
+
+items
+answers
+payments
+8.4 User hủy order
+
+PUT /api/users/orders/2/cancel
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+Content-Type: application/json
+{
+  "cancel_reason": "Đổi kế hoạch"
+}
+8.5 Admin xem tất cả order
+
+GET /api/admin/orders
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+8.6 Admin xem chi tiết order
+
+GET /api/admin/orders/2
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+9. Payments
+9.1 User thanh toán order bằng MetaMask flow
+
+POST /api/users/payments
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+Content-Type: application/json
+{
+  "order_id": 2,
+  "payment_method": "metamask",
+  "amount": 3000000,
+  "currency": "VND",
+  "blockchain_tx_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+  "payer_wallet_address": "0x1f18004d19fcd5e8f2b89ffb5178cb01b5146211"
+}
+9.2 User xem danh sách payments
+
+GET /api/users/payments
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+9.3 User xem chi tiết payment
+
+GET /api/users/payments/1
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+9.4 Admin xem tất cả payments
+
+GET /api/admin/payments
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+9.5 Admin xem chi tiết payment
+
+GET /api/admin/payments/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+9.6 Admin cập nhật trạng thái payment
+
+PUT /api/admin/payments/1/status
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+{
+  "status": "success",
+  "gateway_transaction_id": "STRIPE_TX_123456"
+}
+
+Phần payment trong bản tổng hợp cũ của bạn vẫn đang theo flow này.
+
+10. Tickets
+10.1 Admin phát hành vé theo order đã paid
+
+POST /api/admin/orders/2/issue-tickets
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+
+Flow issue ticket đang phụ thuộc order đã paid và user có ví liên kết.
+
+10.2 Admin xem danh sách vé
+
+GET /api/admin/tickets
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+10.3 Admin xem chi tiết vé
+
+GET /api/admin/tickets/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+10.4 User xem vé của tôi
+
+GET /api/users/tickets
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+10.5 User xem chi tiết vé của tôi
+
+GET /api/users/tickets/1
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+11. Mint NFT
+11.1 Admin mint 1 vé
+
+POST /api/admin/tickets/1/mint
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+11.2 Admin mint toàn bộ vé của 1 order
+
+POST /api/admin/orders/2/mint-tickets
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+11.3 Kiểm tra lại vé sau khi mint
+
+GET /api/admin/tickets/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+
+Hoặc:
+
+GET /api/users/tickets
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+
+Kỳ vọng:
+
+ticket_status = active
+mint_status = minted
+có blockchain_ticket_id
+có mint_tx_hash
+
+Các bước mint/ticket này nằm trong bộ test bạn đã tổng hợp trước và khớp flow hiện tại.
+
+12. Transfers
+12.1 User tạo yêu cầu chuyển nhượng
+
+POST /api/users/transfers
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+Content-Type: application/json
+{
+  "ticket_id": 1,
+  "receiver_wallet_address": "0xb0a566f3f0ec8f57e362e3e0fd0e16417c1a5f8e",
+  "note": "Chuyển vé cho bạn tôi"
+}
+
+Ở đây mình đổi ví nhận sang đúng ví receiver mới nhất bạn đang dùng, thay cho ví 0x333... cũ.
+
+12.2 User xem danh sách yêu cầu chuyển nhượng
+
+GET /api/users/transfers
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+12.3 User xem chi tiết 1 yêu cầu
+
+GET /api/users/transfers/1
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+12.4 User hủy yêu cầu pending
+
+PUT /api/users/transfers/1/cancel
+
+Header:
+
+Authorization: Bearer <USER_TOKEN>
+12.5 Admin xem tất cả yêu cầu chuyển nhượng
+
+GET /api/admin/transfers
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+12.6 Admin xem chi tiết yêu cầu
+
+GET /api/admin/transfers/1
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+12.7 Admin duyệt yêu cầu chuyển nhượng
+
+PUT /api/admin/transfers/1/approve
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+{
+  "admin_note": "Đã kiểm tra và duyệt"
+}
+12.8 Admin từ chối yêu cầu chuyển nhượng
+
+PUT /api/admin/transfers/1/reject
+
+Header:
+
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+{
+  "admin_note": "Từ chối vì thông tin không hợp lệ"
+}
+
+Transfer nằm trong bộ test cũ của bạn và vẫn là flow hiện tại.
+
+13. Thứ tự test chuẩn từ đầu đến cuối
+
+Nếu test full project từ DB gần trống thì đi đúng thứ tự này:
+
+Bước 1
+
+Đăng ký:
+
+admin
+customer
+receiver
+Bước 2
+
+Sửa role admin trong DB:
+
+UPDATE users
+SET role = 'admin'
+WHERE email = 'adminvevuive@gmail.com';
+Bước 3
+
+Login lấy:
+
+ADMIN_TOKEN
+USER_TOKEN
+RECEIVER_TOKEN
+Bước 4
+
+Liên kết ví cho:
+
+customer
+receiver
+Bước 5
+
+Admin tạo event
+
+Bước 6
+
+Admin tạo ticket type
+
+Bước 7
+
+Admin tạo event questions
+
+Bước 8
+
+User gọi lấy questions của event
+
+Bước 9
+
+User tạo order có answers
+
+Bước 10
+
+User thanh toán
+
+Bước 11
+
+Admin issue tickets
+
+Bước 12
+
+Admin mint NFT
+
+Bước 13
+
+User tạo transfer request
+
+Bước 14
+
+Admin approve transfer
+
+Bộ thứ tự cũ của bạn đã có full flow đến approve transfer; mình chỉ chèn thêm phần event questions + answers vào giữa event/ticket type và create order.
+
+14. Ghi chú rất quan trọng cho nhóm FE
+FE cần tách 3 màn chính khi mua vé
+Màn 1: chọn vé
+lấy event
+lấy ticket types
+user chọn quantity
+Màn 2: form câu hỏi trước thanh toán
+gọi GET /api/users/events/:eventId/questions
+render ra form
+thu answers
+Màn 3: tạo order
+gửi items
+gửi answers
+gửi payment_method
+Sau khi tạo order xong
+chuyển sang trang payment
+gọi thanh toán
+rồi mới xem order / tickets
+15. Một vài lưu ý để test đỡ lỗi
+GET profile dùng /api/users/me, không dùng /api/users/profile.
+receiver_wallet_address nên dùng ví receiver mới nhất là 0xb0a566f3f0ec8f57e362e3e0fd0e16417c1a5f8e.
+phần transfer hiện tại là chuyển nhượng trong hệ thống, không phải transfer on-chain thật
+phần payment MetaMask hiện tại là flow nghiệp vụ, chưa phải verify coin on-chain thật
+sau mint, NFT có thể phải import thủ công vào MetaMask để demo
