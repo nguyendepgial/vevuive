@@ -1,0 +1,89 @@
+/* Navbar chung */
+.navbar {
+  background-color: #212529 !important; /* Màu dark của Bootstrap */
+  padding: 0 30px;
+  height: 100px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+}
+
+/* Container chính để chia 3 phần */
+.navbar-container {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Phần bên trái: Logo */
+.logo-section {
+  flex: 1;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.navbar-logo {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #fff !important;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Phần ở giữa: Menu điều hướng */
+.menu-section {
+  flex: 2;
+  display: flex;
+  justify-content: center;
+}
+
+.navbar-nav-custom {
+  display: flex !important;
+  flex-direction: row !important;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nav-link-custom {
+  color: #fff !important;
+  margin: 0 15px;
+  text-decoration: none;
+  font-size: 1.5rem;
+  transition: 0.3s;
+}
+
+.nav-link-custom:hover {
+  color: #adb5bd !important;
+}
+
+/* Phần bên phải: Auth (Đăng nhập/Hồ sơ) */
+.auth-section {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  font-size: 1.5rem;
+  align-items: center;
+}
+
+.auth-link {
+  color: #fff !important;
+  margin-left: 15px;
+  text-decoration: none;
+}
+
+/* Responsive cho màn hình nhỏ */
+@media (max-width: 768px) {
+  .menu-section {
+    display: none; /* Ẩn menu giữa trên mobile hoặc bạn có thể dùng Toggle của Bootstrap */
+  }
+  
+  .navbar-container {
+    justify-content: space-between;
+  }
+}

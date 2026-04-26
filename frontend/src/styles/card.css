@@ -1,0 +1,115 @@
+:root {
+  --ticket-bg: #ffffff;
+  --ticket-radius: 20px;      /* Bo góc nhỏ lại cho sang */
+  --punch-size: 60px;        /* Lỗ đục nhỏ hơn */
+  --bg-web: #f4f4f4;         /* Khớp với main.css */
+}
+
+/* --- KHUNG VÉ TỔNG THỂ --- */
+.ticket-detail-card {
+  min-height: 420px;         /* Chiều cao vừa phải */
+  border: none !important;
+  border-radius: var(--ticket-radius) !important;
+  background-color: var(--ticket-bg);
+  position: relative;
+  overflow: visible !important; 
+  margin: 1rem auto;
+  box-shadow: none !important;
+}
+
+.ticket-punch-line {
+  position: absolute;
+  left: calc(100% * 4 / 12); /* Khớp chính xác với Col md={4} */
+  top: 0; bottom: 0; width: 0;
+  display: flex; justify-content: center; align-items: center;
+  z-index: 10; pointer-events: none;
+}
+
+.circle {
+  width: var(--punch-size);
+  height: var(--punch-size);
+  background-color: var(--bg-color, #f4f4f4);
+  border-radius: 50%;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+#circle1 { top: calc(var(--punch-size) / -2); }
+#circle2 { bottom: calc(var(--punch-size) / -2); }
+
+#vertical-dashed {
+  height: 75%;
+  opacity: 0.2; /* Nét đứt mờ nhẹ tinh tế */
+}
+
+/* --- NỘI DUNG (THU NHỎ KÍCH THƯỚC CHỮ) --- */
+.ticket-body {
+  padding: 1.5rem !important; /* Giảm padding để chữ không bị to */
+  display: flex; 
+  flex-direction: column; 
+  justify-content: space-between;
+  height: 100%;
+}
+
+.ticket-event-title {
+  font-size: 1.3rem;           /* Nhỏ lại như 75% */
+  font-weight: 800;
+  color: #111;
+  line-height: 1.2;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.ticket-label {
+  font-size: 0.6rem;           /* Nhãn tiêu đề rất nhỏ */
+  font-weight: 700;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.ticket-value {
+  font-size: 0.85rem;          /* Nội dung chữ nhỏ gọn */
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 0.8rem;
+}
+
+.price-text {
+  font-size: 1.4rem !important; 
+  color: #27ae60 !important;
+  font-weight: 800;
+}
+
+/* --- HÌNH ẢNH BANNER --- */
+.ticket-image-wrapper {
+  height: 100%; 
+  overflow: hidden;
+  border-radius: 0 var(--ticket-radius) var(--ticket-radius) 0;
+}
+
+.img-main-ticket {
+  width: 100%; 
+  height: 100%; 
+  object-fit: cover; 
+  display: block;
+}
+
+/* --- NÚT BẤM --- */
+.btn-buy-ticket-large {
+  background-color: #000 !important;
+  border-radius: 8px !important;
+  padding: 10px !important;    /* Nút gọn gàng */
+  font-size: 0.85rem !important;
+  font-weight: 700 !important;
+  border: none !important;
+}
+
+/* Responsive cho Mobile */
+@media (max-width: 768px) {
+  .ticket-punch-line { display: none; }
+  .ticket-image-wrapper { height: 220px; border-radius: 0 0 var(--ticket-radius) var(--ticket-radius); }
+  .ticket-body { padding: 1.2rem !important; }
+}

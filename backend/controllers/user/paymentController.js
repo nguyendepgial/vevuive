@@ -1,4 +1,7 @@
 const pool = require("../../config/db");
+const {
+  debitBalance,
+} = require("../../services/internalWalletService");
 
 // =========================
 // Helpers
@@ -18,19 +21,26 @@ function parsePositiveInt(value) {
 
 function parsePositiveNumber(value) {
   const parsed = Number(value);
-  return Number.isNaN(parsed) || parsed <= 0 ? null : parsed;
-}
-
-function isAllowedPaymentMethod(paymentMethod) {
-  return ["demo", "metamask", "stripe", "bank_transfer", "cash"].includes(paymentMethod);
+  return Number.isNaN(parsed) || parsed <= 0 ? null : Number(parsed.toFixed(2));
 }
 
 function isValidWalletAddress(address) {
-  return /^0x[a-f0-9]{40}$/.test(address);
+  return /^0x[a-fA-F0-9]{40}$/.test(address);
 }
 
-function isValidBlockchainTxHash(hash) {
-  return /^0x[a-fA-F0-9]{64}$/.test(hash);
+/**
+ * Hiện tại DB chưa có enum app_wallet.
+ * Vì vậy backend lưu payment_method = 'demo',
+ * nhưng nghiệp vụ hiểu là thanh toán bằng ví nội bộ.
+ */
+function normalizePaymentMethodForDb(paymentMethod) {
+  const method = normalizeString(paymentMethod || "demo").toLowerCase();
+
+  if (["demo", "app_wallet", "internal_wallet", "metamask"].includes(method)) {
+    return "demo";
+  }
+
+  return null;
 }
 
 function generatePaymentCode() {
@@ -45,8 +55,200 @@ function generatePaymentCode() {
   return `PAY${y}${m}${d}${h}${i}${s}${rand}`;
 }
 
+function generateTicketCode() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const h = String(now.getHours()).padStart(2, "0");
+  const i = String(now.getMinutes()).padStart(2, "0");
+  const s = String(now.getSeconds()).padStart(2, "0");
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `TCK${y}${m}${d}${h}${i}${s}${rand}`;
+}
+
+async function generateUniquePaymentCode(connection) {
+  let code;
+  let exists = true;
+
+  while (exists) {
+    code = generatePaymentCode();
+
+    const [rows] = await connection.query(
+      `
+      SELECT id
+      FROM payments
+      WHERE payment_code = ?
+      LIMIT 1
+      `,
+      [code]
+    );
+
+    exists = rows.length > 0;
+  }
+
+  return code;
+}
+
+async function generateUniqueTicketCode(connection) {
+  let code;
+  let exists = true;
+
+  while (exists) {
+    code = generateTicketCode();
+
+    const [rows] = await connection.query(
+      `
+      SELECT id
+      FROM tickets
+      WHERE ticket_code = ?
+      LIMIT 1
+      `,
+      [code]
+    );
+
+    exists = rows.length > 0;
+  }
+
+  return code;
+}
+
+function buildDefaultMetadataUri(ticketId) {
+  const baseUrl = (process.env.BASE_URL || "http://localhost:5001").replace(/\/+$/, "");
+  return `${baseUrl}/api/users/tickets/${ticketId}`;
+}
+
+async function releaseReservedTickets(connection, orderId) {
+  await connection.query(
+    `
+    UPDATE ticket_types tt
+    INNER JOIN order_items oi ON oi.ticket_type_id = tt.id
+    SET tt.quantity_sold = GREATEST(tt.quantity_sold - oi.quantity, 0),
+        tt.updated_at = NOW()
+    WHERE oi.order_id = ?
+    `,
+    [orderId]
+  );
+}
+
+/**
+ * Phát hành vé sau khi thanh toán thành công.
+ * Vé được active ngay trong hệ thống.
+ * Blockchain/NFT chỉ là optional, không còn bắt buộc để đơn hoàn tất.
+ */
+async function issueTicketsAutomatically(connection, orderId, userId, walletAddress) {
+  const normalizedWallet = normalizeWalletAddress(walletAddress);
+
+  if (!normalizedWallet || !isValidWalletAddress(normalizedWallet)) {
+    throw new Error("Người dùng chưa có ví hợp lệ để phát hành vé");
+  }
+
+  const [orderItemRows] = await connection.query(
+    `
+    SELECT
+      oi.id,
+      oi.order_id,
+      oi.ticket_type_id,
+      oi.ticket_type_name_snapshot,
+      oi.unit_price,
+      oi.quantity,
+      oi.subtotal,
+      tt.event_id
+    FROM order_items oi
+    INNER JOIN ticket_types tt ON tt.id = oi.ticket_type_id
+    WHERE oi.order_id = ?
+    FOR UPDATE
+    `,
+    [orderId]
+  );
+
+  if (orderItemRows.length === 0) {
+    throw new Error("Đơn hàng không có chi tiết vé");
+  }
+
+  const createdTicketIds = [];
+
+  for (const item of orderItemRows) {
+    const [issuedCountRows] = await connection.query(
+      `
+      SELECT COUNT(*) AS issued_count
+      FROM tickets
+      WHERE order_item_id = ?
+      `,
+      [item.id]
+    );
+
+    const issuedCount = Number(issuedCountRows[0].issued_count || 0);
+
+    if (issuedCount > Number(item.quantity)) {
+      throw new Error(`Dữ liệu vé của order item ${item.id} không hợp lệ`);
+    }
+
+    const remainingToIssue = Number(item.quantity) - issuedCount;
+
+    for (let index = 0; index < remainingToIssue; index++) {
+      const ticketCode = await generateUniqueTicketCode(connection);
+
+      const [insertResult] = await connection.query(
+        `
+        INSERT INTO tickets (
+          ticket_code,
+          order_id,
+          order_item_id,
+          event_id,
+          ticket_type_id,
+          owner_user_id,
+          owner_wallet_address,
+          unit_price,
+          ticket_status,
+          blockchain_ticket_id,
+          contract_address,
+          mint_tx_hash,
+          metadata_uri,
+          mint_status,
+          minted_at,
+          transferred_count,
+          last_transfer_at,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, NULL, NULL, NULL, 'pending', NULL, 0, NULL, NOW(), NOW())
+        `,
+        [
+          ticketCode,
+          orderId,
+          item.id,
+          item.event_id,
+          item.ticket_type_id,
+          userId,
+          normalizedWallet,
+          item.unit_price,
+        ]
+      );
+
+      const ticketId = insertResult.insertId;
+      const metadataUri = buildDefaultMetadataUri(ticketId);
+
+      await connection.query(
+        `
+        UPDATE tickets
+        SET metadata_uri = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [metadataUri, ticketId]
+      );
+
+      createdTicketIds.push(ticketId);
+    }
+  }
+
+  return createdTicketIds;
+}
+
 // =========================
 // User - Pay My Order
+// POST /api/users/payments/pay
 // =========================
 const payMyOrder = async (req, res) => {
   const connection = await pool.getConnection();
@@ -59,23 +261,13 @@ const payMyOrder = async (req, res) => {
       payment_method,
       amount,
       currency,
-      gateway_transaction_id,
-      blockchain_tx_hash,
-      payer_wallet_address,
       gateway_response,
     } = req.body;
 
     order_id = parsePositiveInt(order_id);
-    payment_method = normalizeString(payment_method || "demo").toLowerCase();
+    payment_method = normalizePaymentMethodForDb(payment_method);
     amount = parsePositiveNumber(amount);
     currency = normalizeString(currency || "VND").toUpperCase();
-    gateway_transaction_id = normalizeString(gateway_transaction_id);
-    blockchain_tx_hash = normalizeString(blockchain_tx_hash);
-    payer_wallet_address = normalizeWalletAddress(payer_wallet_address);
-    gateway_response =
-      gateway_response !== undefined && gateway_response !== null
-        ? JSON.stringify(gateway_response)
-        : null;
 
     const errors = {};
 
@@ -83,26 +275,12 @@ const payMyOrder = async (req, res) => {
       errors.order_id = "order_id không hợp lệ";
     }
 
-    if (!isAllowedPaymentMethod(payment_method)) {
-      errors.payment_method = "Phương thức thanh toán không hợp lệ";
-    }
-
-    if (!amount) {
-      errors.amount = "Số tiền thanh toán không hợp lệ";
+    if (!payment_method) {
+      errors.payment_method = "Hiện hệ thống chỉ hỗ trợ thanh toán bằng ví nội bộ";
     }
 
     if (!currency || currency.length !== 3) {
       errors.currency = "Mã tiền tệ không hợp lệ";
-    }
-
-    if (payment_method === "metamask") {
-      if (!blockchain_tx_hash || !isValidBlockchainTxHash(blockchain_tx_hash)) {
-        errors.blockchain_tx_hash = "Blockchain tx hash không hợp lệ";
-      }
-
-      if (!payer_wallet_address || !isValidWalletAddress(payer_wallet_address)) {
-        errors.payer_wallet_address = "Địa chỉ ví thanh toán không hợp lệ";
-      }
     }
 
     if (Object.keys(errors).length > 0) {
@@ -119,6 +297,7 @@ const payMyOrder = async (req, res) => {
       `
       SELECT
         id,
+        order_code,
         user_id,
         total_amount,
         payment_status,
@@ -144,6 +323,11 @@ const payMyOrder = async (req, res) => {
     }
 
     const order = orderRows[0];
+    const orderTotalAmount = Number(order.total_amount);
+
+    if (!amount) {
+      amount = orderTotalAmount;
+    }
 
     if (order.payment_status === "paid") {
       await connection.rollback();
@@ -162,6 +346,8 @@ const payMyOrder = async (req, res) => {
     }
 
     if (order.expires_at && new Date(order.expires_at) < new Date()) {
+      await releaseReservedTickets(connection, order_id);
+
       await connection.query(
         `
         UPDATE orders
@@ -173,14 +359,15 @@ const payMyOrder = async (req, res) => {
         [order_id]
       );
 
-      await connection.rollback();
+      await connection.commit();
+
       return res.status(400).json({
         success: false,
         message: "Đơn hàng đã hết hạn thanh toán",
       });
     }
 
-    if (Number(amount) !== Number(order.total_amount)) {
+    if (Number(amount) !== orderTotalAmount) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
@@ -188,36 +375,79 @@ const payMyOrder = async (req, res) => {
       });
     }
 
-    if (payment_method === "metamask") {
-      const [walletRows] = await connection.query(
-        `
-        SELECT wallet_address
-        FROM wallets
-        WHERE user_id = ?
-        LIMIT 1
-        `,
-        [userId]
-      );
+    const [walletRows] = await connection.query(
+      `
+      SELECT
+        id,
+        wallet_address,
+        wallet_type,
+        network_name,
+        is_verified
+      FROM wallets
+      WHERE user_id = ?
+      LIMIT 1
+      `,
+      [userId]
+    );
 
-      if (walletRows.length === 0) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Người dùng chưa liên kết ví",
-        });
-      }
-
-      const linkedWallet = String(walletRows[0].wallet_address || "").toLowerCase();
-      if (linkedWallet !== payer_wallet_address) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Ví thanh toán không khớp với ví đã liên kết",
-        });
-      }
+    if (walletRows.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Bạn cần liên kết ví trước khi thanh toán",
+      });
     }
 
-    const paymentCode = generatePaymentCode();
+    const linkedWalletAddress = normalizeWalletAddress(walletRows[0].wallet_address);
+
+    if (!linkedWalletAddress || !isValidWalletAddress(linkedWalletAddress)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Ví đã liên kết không hợp lệ",
+      });
+    }
+
+    let walletTransaction;
+
+    try {
+      walletTransaction = await debitBalance(connection, {
+        userId,
+        amount,
+        transactionType: "purchase_ticket",
+        referenceType: "order",
+        referenceId: order_id,
+        note: `Thanh toán đơn hàng ${order.order_code}`,
+        adminId: null,
+      });
+    } catch (walletErr) {
+      await connection.rollback();
+
+      if (walletErr.code === "INSUFFICIENT_BALANCE") {
+        return res.status(400).json({
+          success: false,
+          message: "Số dư ví nội bộ không đủ để thanh toán đơn hàng",
+          data: {
+            current_balance: walletErr.currentBalance,
+            required_amount: walletErr.requiredAmount,
+          },
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: walletErr.message || "Không thể trừ tiền ví nội bộ",
+      });
+    }
+
+    const paymentCode = await generateUniquePaymentCode(connection);
+
+    const normalizedGatewayResponse = JSON.stringify({
+      source: "internal_wallet",
+      note: "Thanh toán bằng ví nội bộ trong hệ thống",
+      wallet_transaction_id: walletTransaction.id,
+      submitted_data: gateway_response || null,
+    });
 
     const [paymentResult] = await connection.query(
       `
@@ -236,7 +466,7 @@ const payMyOrder = async (req, res) => {
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'success', NOW(), ?, NOW(), NOW())
+      VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, 'success', NOW(), ?, NOW(), NOW())
       `,
       [
         paymentCode,
@@ -244,18 +474,23 @@ const payMyOrder = async (req, res) => {
         payment_method,
         amount,
         currency,
-        gateway_transaction_id || null,
-        blockchain_tx_hash || null,
-        payer_wallet_address || null,
-        gateway_response,
+        linkedWalletAddress,
+        normalizedGatewayResponse,
       ]
+    );
+
+    const createdTicketIds = await issueTicketsAutomatically(
+      connection,
+      order_id,
+      userId,
+      linkedWalletAddress
     );
 
     await connection.query(
       `
       UPDATE orders
       SET payment_status = 'paid',
-          order_status = 'processing',
+          order_status = 'completed',
           payment_method = ?,
           updated_at = NOW()
       WHERE id = ?
@@ -312,16 +547,50 @@ const payMyOrder = async (req, res) => {
       [order_id]
     );
 
+    const [ticketRows] = await pool.query(
+      `
+      SELECT
+        id,
+        ticket_code,
+        order_id,
+        order_item_id,
+        event_id,
+        ticket_type_id,
+        owner_user_id,
+        owner_wallet_address,
+        unit_price,
+        ticket_status,
+        blockchain_ticket_id,
+        contract_address,
+        mint_tx_hash,
+        metadata_uri,
+        mint_status,
+        minted_at,
+        transferred_count,
+        last_transfer_at,
+        created_at,
+        updated_at
+      FROM tickets
+      WHERE order_id = ?
+      ORDER BY id ASC
+      `,
+      [order_id]
+    );
+
     return res.status(200).json({
       success: true,
-      message: "Thanh toán thành công",
+      message: "Thanh toán thành công, vé đã được phát hành",
       data: {
         order: updatedOrderRows[0],
         payment: paymentRows[0],
+        wallet_transaction: walletTransaction,
+        tickets: ticketRows,
+        created_ticket_count: createdTicketIds.length,
       },
     });
   } catch (err) {
     await connection.rollback();
+
     return res.status(500).json({
       success: false,
       message: "Lỗi server khi xử lý thanh toán",
@@ -334,6 +603,7 @@ const payMyOrder = async (req, res) => {
 
 // =========================
 // User - Get My Payments
+// GET /api/users/payments
 // =========================
 const getMyPayments = async (req, res) => {
   try {
@@ -418,6 +688,7 @@ const getMyPayments = async (req, res) => {
 
 // =========================
 // User - Get My Payment Detail
+// GET /api/users/payments/:id
 // =========================
 const getMyPaymentDetail = async (req, res) => {
   try {
